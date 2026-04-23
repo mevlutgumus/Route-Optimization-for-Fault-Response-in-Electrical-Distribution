@@ -14,7 +14,7 @@ from geopy.distance import geodesic
 OPTIMAL_STATUS_CODE = 1
 
 st.set_page_config(page_title="Fault Response Optimization", layout="wide")
-st.title("Route Optimization for Fault Response in Electrical Distribution (GAP + PC-TSP)")
+st.title("Route Optimization for Fault Response in Electrical Distribution")
 
 # =========================================================================
 # CREW LOCATIONS (BEDAS Operating Directorates — European Side of Istanbul)
@@ -470,8 +470,6 @@ with col_right:
             '<span style="color:#ffaa33; text-shadow:0 0 6px #ff8c00;">P2 — Security / Public Order (Military Zone)</span></div>'
             '<div style="margin:4px 0;"><span style="color:#ffd700; text-shadow:0 0 8px #ffd700; font-weight:bold;">⬤</span> '
             '<span style="color:#ffe44d; text-shadow:0 0 6px #ffd700;">P3 — Socially Sensitive (School, Care Home)</span></div>'
-            '<div style="margin:4px 0;"><span style="color:#888; font-weight:bold;">⬤</span> '
-            '<span style="color:#aaa;">P4 — Normal (Residential, Commercial)</span></div>'
             '</div>',
             unsafe_allow_html=True
         )
@@ -713,7 +711,7 @@ with col_map:
 
     # Footer credit
     st.markdown(
-        "<div style='text-align:right; color:gray; font-size:15px; padding-top:10px;'>"
+        "<div style='text-align:right; color:gray; font-size:20px; padding-top:14px;'>"
         "Built by Mevlüt Gümüş</div>",
         unsafe_allow_html=True
     )
