@@ -99,7 +99,7 @@ def compute_distance_matrix(node_coords):
 # =========================================================================
 # SOLVE GAP (PULP)
 # =========================================================================
-def solve_gap(C_ij, crew_list, fault_list, cap_dict):
+def solve_gap(C_ij, crew_list, fault_list, cap_dict, priority_map=None):
     prob = lp.LpProblem("GAP_Assignment", lp.LpMinimize)
     X_ij = lp.LpVariable.dicts(
         "Assign",
@@ -117,6 +117,17 @@ def solve_gap(C_ij, crew_list, fault_list, cap_dict):
     # K2: Crew capacities must not be exceeded
     for i in crew_list:
         prob += lp.lpSum(X_ij[(i, j)] for j in fault_list) <= int(cap_dict[i])
+
+    # K5: Priority distribution — spread critical faults across crews
+    # Ensures no crew is overloaded with high-priority faults while others have none
+    if priority_map:
+        import math
+        for p_level in [1, 2, 3]:
+            faults_at_p = [j for j in fault_list if priority_map.get(j, 4) == p_level]
+            if len(faults_at_p) > 0:
+                max_per_crew = math.ceil(len(faults_at_p) / len(crew_list))
+                for i in crew_list:
+                    prob += lp.lpSum(X_ij[(i, j)] for j in faults_at_p) <= max_per_crew
 
     prob.solve(lp.PULP_CBC_CMD(msg=0))
     return prob, X_ij
@@ -383,7 +394,7 @@ if run_btn or ("last_solution" not in st.session_state):
     # ---- STAGE 1: GAP ----
     with st.spinner("Stage 1: GAP — Computing geodesic distances and assigning crews..."):
         C_ij = compute_C_ij_geodesic(crew_data, substation_coords)
-        prob_gap, X_ij = solve_gap(C_ij, crew_list, fault_list, cap_dict)
+        prob_gap, X_ij = solve_gap(C_ij, crew_list, fault_list, cap_dict, priority_map)
 
     if prob_gap.status != OPTIMAL_STATUS_CODE:
         st.error("GAP optimal solution not found. Try increasing crew capacities.")
