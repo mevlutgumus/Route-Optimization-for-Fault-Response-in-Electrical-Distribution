@@ -100,52 +100,92 @@ def compute_distance_matrix(node_coords):
 # SOLVE GAP (PULP)
 # =========================================================================
 def solve_gap(C_ij, crew_list, fault_list, cap_dict, priority_map=None):
+    import math
+
+    # Check if Emergency mode with actual priorities
+    has_critical = priority_map and any(priority_map.get(j, 4) <= 3 for j in fault_list)
+
+    if not has_critical:
+        # Standard mode: single GAP, pure distance minimization
+        return _solve_standard_gap(C_ij, crew_list, fault_list, cap_dict)
+
+    # ===== EMERGENCY MODE: WAVE-BASED SEQUENTIAL ASSIGNMENT =====
+    # Wave 1: P1 → Wave 2: P2 → Wave 3: P3 → Wave 4: P4
+    # Each wave assigns faults of that priority to nearest crews
+    # with remaining capacity, spreading them across crews (max 1 per crew)
+    remaining_cap = {i: int(cap_dict[i]) for i in crew_list}
+    all_assignments = {}
+
+    for p_level in [1, 2, 3, 4]:
+        faults_at_p = [j for j in fault_list if priority_map.get(j, 4) == p_level]
+        if not faults_at_p:
+            continue
+
+        prob = lp.LpProblem(f"GAP_Wave_P{p_level}", lp.LpMinimize)
+        X = lp.LpVariable.dicts("X",
+            [(i, j) for i in crew_list for j in faults_at_p], cat=lp.LpBinary)
+
+        # Objective: minimize distance for this wave
+        prob += lp.lpSum(C_ij[i][j] * X[(i, j)]
+            for i in crew_list for j in faults_at_p)
+
+        # Each fault assigned to exactly one crew
+        for j in faults_at_p:
+            prob += lp.lpSum(X[(i, j)] for i in crew_list) == 1
+
+        # Remaining capacity per crew
+        for i in crew_list:
+            prob += lp.lpSum(X[(i, j)] for j in faults_at_p) <= remaining_cap[i]
+
+        # Spread: max 1 per crew when possible, otherwise ceil
+        max_per = max(1, math.ceil(len(faults_at_p) / len([c for c in crew_list if remaining_cap[c] > 0]))) if any(remaining_cap[c] > 0 for c in crew_list) else 1
+        for i in crew_list:
+            prob += lp.lpSum(X[(i, j)] for j in faults_at_p) <= max_per
+
+        prob.solve(lp.PULP_CBC_CMD(msg=0))
+
+        if prob.status != 1:
+            # Fallback: solve entire problem as standard GAP
+            return _solve_standard_gap(C_ij, crew_list, fault_list, cap_dict)
+
+        # Record assignments, reduce remaining capacity
+        for i in crew_list:
+            for j in faults_at_p:
+                if lp.value(X[(i, j)]) is not None and lp.value(X[(i, j)]) > 0.5:
+                    all_assignments[(i, j)] = 1
+                    remaining_cap[i] -= 1
+
+    # Build combined result matching expected interface
+    prob_combined = lp.LpProblem("GAP_Combined", lp.LpMinimize)
+    X_ij = lp.LpVariable.dicts("Assign",
+        [(i, j) for i in crew_list for j in fault_list], cat=lp.LpBinary)
+
+    # Fix variables to wave-computed assignments
+    for i in crew_list:
+        for j in fault_list:
+            if (i, j) in all_assignments:
+                prob_combined += X_ij[(i, j)] == 1
+            else:
+                prob_combined += X_ij[(i, j)] == 0
+
+    prob_combined += lp.lpSum(C_ij[i][j] * X_ij[(i, j)]
+        for i in crew_list for j in fault_list)
+    prob_combined.solve(lp.PULP_CBC_CMD(msg=0))
+
+    return prob_combined, X_ij
+
+
+def _solve_standard_gap(C_ij, crew_list, fault_list, cap_dict):
+    """Standard GAP — pure distance minimization, no priority awareness."""
     prob = lp.LpProblem("GAP_Assignment", lp.LpMinimize)
-    X_ij = lp.LpVariable.dicts(
-        "Assign",
-        [(i, j) for i in crew_list for j in fault_list],
-        cat=lp.LpBinary
-    )
-
-    # Priority weight: critical faults get drastically lower cost so solver
-    # ALWAYS assigns them to nearest crew before any P4
-    # P1=0.01 (100x over P4), P2=0.05 (20x), P3=0.10 (10x), P4=1.0
-    priority_weight = {1: 0.01, 2: 0.05, 3: 0.10, 4: 1.0}
-
-    # Objective Function: Minimize priority-weighted assignment distance
-    prob += lp.lpSum(
-        C_ij[i][j] * priority_weight.get(priority_map.get(j, 4) if priority_map else 4, 1.0) * X_ij[(i, j)]
-        for i in crew_list for j in fault_list
-    )
-
-    # K1: Each fault must be assigned to exactly one crew
+    X_ij = lp.LpVariable.dicts("Assign",
+        [(i, j) for i in crew_list for j in fault_list], cat=lp.LpBinary)
+    prob += lp.lpSum(C_ij[i][j] * X_ij[(i, j)]
+        for i in crew_list for j in fault_list)
     for j in fault_list:
         prob += lp.lpSum(X_ij[(i, j)] for i in crew_list) == 1
-
-    # K2: Crew capacities must not be exceeded
     for i in crew_list:
         prob += lp.lpSum(X_ij[(i, j)] for j in fault_list) <= int(cap_dict[i])
-
-    # K5: Priority distribution — spread ALL critical faults across crews
-    # Limits TOTAL critical faults (P1+P2+P3 combined) per crew
-    # so no crew is overloaded with multiple critical faults while others have none
-    if priority_map:
-        import math
-        # Combined critical fault distribution
-        all_critical = [j for j in fault_list if priority_map.get(j, 4) <= 3]
-        if len(all_critical) > 0:
-            max_critical_per_crew = math.ceil(len(all_critical) / len(crew_list))
-            for i in crew_list:
-                prob += lp.lpSum(X_ij[(i, j)] for j in all_critical) <= max_critical_per_crew
-
-        # Also spread each individual level
-        for p_level in [1, 2, 3]:
-            faults_at_p = [j for j in fault_list if priority_map.get(j, 4) == p_level]
-            if len(faults_at_p) > 0:
-                max_per_crew = math.ceil(len(faults_at_p) / len(crew_list))
-                for i in crew_list:
-                    prob += lp.lpSum(X_ij[(i, j)] for j in faults_at_p) <= max_per_crew
-
     prob.solve(lp.PULP_CBC_CMD(msg=0))
     return prob, X_ij
 
