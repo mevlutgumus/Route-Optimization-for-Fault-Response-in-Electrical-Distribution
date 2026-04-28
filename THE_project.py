@@ -107,8 +107,16 @@ def solve_gap(C_ij, crew_list, fault_list, cap_dict, priority_map=None):
         cat=lp.LpBinary
     )
 
-    # Objective Function: Minimize total assignment distance
-    prob += lp.lpSum(C_ij[i][j] * X_ij[(i, j)] for i in crew_list for j in fault_list)
+    # Priority weight: critical faults get much lower cost so solver
+    # assigns them to the nearest possible crew first
+    # P1=0.1, P2=0.3, P3=0.5, P4=1.0
+    priority_weight = {1: 0.1, 2: 0.3, 3: 0.5, 4: 1.0}
+
+    # Objective Function: Minimize priority-weighted assignment distance
+    prob += lp.lpSum(
+        C_ij[i][j] * priority_weight.get(priority_map.get(j, 4) if priority_map else 4, 1.0) * X_ij[(i, j)]
+        for i in crew_list for j in fault_list
+    )
 
     # K1: Each fault must be assigned to exactly one crew
     for j in fault_list:
