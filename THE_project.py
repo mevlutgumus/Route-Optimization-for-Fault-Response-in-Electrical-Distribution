@@ -125,9 +125,14 @@ def solve_gap(C_ij, crew_list, fault_list, cap_dict, priority_map=None):
         X = lp.LpVariable.dicts("X",
             [(i, j) for i in crew_list for j in faults_at_p], cat=lp.LpBinary)
 
-        # Objective: minimize distance for this wave
-        prob += lp.lpSum(C_ij[i][j] * X[(i, j)]
-            for i in crew_list for j in faults_at_p)
+        # Objective: minimize distance BUT heavily penalize crews that already
+        # have critical faults from previous waves → forces spreading
+        # Only penalize during critical waves (P1-P3), not P4
+        PENALTY = 10000 if p_level <= 3 else 0
+        prob += lp.lpSum(
+            (C_ij[i][j] + PENALTY * sum(1 for (ii, jj) in all_assignments if ii == i)) * X[(i, j)]
+            for i in crew_list for j in faults_at_p
+        )
 
         # Each fault assigned to exactly one crew
         for j in faults_at_p:
