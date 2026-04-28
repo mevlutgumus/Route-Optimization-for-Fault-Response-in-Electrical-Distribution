@@ -107,10 +107,10 @@ def solve_gap(C_ij, crew_list, fault_list, cap_dict, priority_map=None):
         cat=lp.LpBinary
     )
 
-    # Priority weight: critical faults get much lower cost so solver
-    # assigns them to the nearest possible crew first
-    # P1=0.1, P2=0.3, P3=0.5, P4=1.0
-    priority_weight = {1: 0.1, 2: 0.3, 3: 0.5, 4: 1.0}
+    # Priority weight: critical faults get drastically lower cost so solver
+    # ALWAYS assigns them to nearest crew before any P4
+    # P1=0.01 (100x over P4), P2=0.05 (20x), P3=0.10 (10x), P4=1.0
+    priority_weight = {1: 0.01, 2: 0.05, 3: 0.10, 4: 1.0}
 
     # Objective Function: Minimize priority-weighted assignment distance
     prob += lp.lpSum(
