@@ -126,10 +126,19 @@ def solve_gap(C_ij, crew_list, fault_list, cap_dict, priority_map=None):
     for i in crew_list:
         prob += lp.lpSum(X_ij[(i, j)] for j in fault_list) <= int(cap_dict[i])
 
-    # K5: Priority distribution — spread critical faults across crews
-    # Ensures no crew is overloaded with high-priority faults while others have none
+    # K5: Priority distribution — spread ALL critical faults across crews
+    # Limits TOTAL critical faults (P1+P2+P3 combined) per crew
+    # so no crew is overloaded with multiple critical faults while others have none
     if priority_map:
         import math
+        # Combined critical fault distribution
+        all_critical = [j for j in fault_list if priority_map.get(j, 4) <= 3]
+        if len(all_critical) > 0:
+            max_critical_per_crew = math.ceil(len(all_critical) / len(crew_list))
+            for i in crew_list:
+                prob += lp.lpSum(X_ij[(i, j)] for j in all_critical) <= max_critical_per_crew
+
+        # Also spread each individual level
         for p_level in [1, 2, 3]:
             faults_at_p = [j for j in fault_list if priority_map.get(j, 4) == p_level]
             if len(faults_at_p) > 0:
